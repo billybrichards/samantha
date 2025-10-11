@@ -2247,9 +2247,18 @@ def launch_notebook():
     """
     click.play()                    # Play a click sound
     
-    python_path = os.path.join(fr'{DIRETORIO_LOCAL}\miniconda3\envs\jupyterlab\Scripts', "jupyter-lab.exe") # Define the path to the Jupyter Lab executable in the specified Python environment
+    # python_path = os.path.join(fr'{DIRETORIO_LOCAL}\miniconda3\envs\jupyterlab\Scripts', "jupyter-lab.exe") # Define the path to the Jupyter Lab executable in the specified Python environment
     
-    subprocess.Popen([python_path]) # Open Jupyter Lab using the specified Python environment's executable path
+    # Define the path to the Python executable in the specified environment
+    python_path = os.path.join(fr'{DIRETORIO_LOCAL}\miniconda3\envs\jupyterlab', "python.exe")
+    
+    # subprocess.Popen([python_path]) # Open Jupyter Lab using the specified Python environment's executable path
+
+    # Executar o módulo jupyter lab através do Python
+    # subprocess.Popen([python_path, "-m", "jupyter", "lab"])
+
+    # Launch Jupyter Lab as a Python module using os.system
+    os.system(f'"{python_path}" -m jupyterlab')
 
         
 def copy_code():
