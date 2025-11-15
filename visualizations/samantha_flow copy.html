@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Samantha Prompt & llama.cpp Anatomy</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+    :root {
+        color-scheme: dark;
+        --bg: #050914;
+        --panel: #11182b;
+        --border: rgba(255, 255, 255, 0.08);
+        --text: #f8fafc;
+        --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+        margin: 0;
+        padding: 1.5rem;
+        background: radial-gradient(circle at top, #1e3a8a 0%, var(--bg) 45%);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    header, section {
+        width: min(1200px, 100%);
+        margin: 0 auto;
+        background: rgba(8, 13, 31, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(12px);
+    }
+    h1 { margin: 0 0 0.6rem; font-size: clamp(1.4rem, 4vw, 2.2rem); }
+    p.lead { margin: 0; color: var(--muted); }
+    svg {
+        width: 100%;
+        height: 640px;
+        border-radius: 16px;
+        background: repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0, rgba(255,255,255,0.02) 16px, transparent 16px, transparent 32px);
+        border: 1px solid rgba(255,255,255,0.05);
+    }
+    .lane-label {
+        font-size: 0.9rem;
+        fill: var(--muted);
+        text-anchor: middle;
+    }
+    .node circle {
+        r: 34;
+        stroke: rgba(3, 7, 18, 0.9);
+        stroke-width: 3px;
+        cursor: pointer;
+    }
+    .node text {
+        fill: var(--text);
+        pointer-events: none;
+        text-anchor: middle;
+        font-size: 0.72rem;
+        paint-order: stroke;
+        stroke: rgba(3, 7, 18, 0.95);
+        stroke-width: 4px;
+        stroke-linejoin: round;
+        font-weight: 500;
+    }
+    .data-type-badge {
+        font-size: 0.65rem;
+        fill: #fbbf24;
+        font-weight: 600;
+        paint-order: stroke;
+        stroke: rgba(3, 7, 18, 0.95);
+        stroke-width: 3px;
+    }
+    .link {
+        fill: none;
+        stroke-width: 2.5px;
+        opacity: 0.75;
+    }
+    .dimmed { opacity: 0.08 !important; }
+    #legend {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.8rem;
+        margin-top: 1rem;
+    }
+    .legend-card {
+        padding: 1rem;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.8);
+        position: relative;
+    }
+    .legend-card::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        background: var(--card-color, #fff);
+        box-shadow: 0 0 12px var(--card-color, #fff);
+    }
+    .legend-card h3 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+    .legend-card p { margin: 0; font-size: 0.85rem; color: var(--muted); }
+    .timeline {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    .timeline-step {
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1rem 1.2rem;
+    }
+    .timeline-step strong {
+        display: block;
+        font-size: 0.95rem;
+        margin-bottom: 0.35rem;
+    }
+    #tooltip {
+        position: absolute;
+        pointer-events: none;
+        padding: 0.9rem 1rem;
+        background: rgba(7, 11, 25, 0.98);
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        max-width: 380px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        backdrop-filter: blur(8px);
+    }
+    .tooltip-datatype {
+        display: inline-block;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: #000;
+        padding: 0.15rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        margin-top: 0.4rem;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+    }
+    .interface-section {
+        margin-top: 2rem;
+    }
+    .interface-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+    .interface-card {
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.85) 100%);
+        border: 2px solid var(--border);
+        border-radius: 18px;
+        padding: 1.5rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .interface-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--accent-color, #3b82f6);
+        box-shadow: 0 0 20px var(--accent-color, #3b82f6);
+    }
+    .interface-card h3 {
+        margin: 0 0 0.5rem;
+        font-size: 1.2rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .interface-card .icon {
+        font-size: 1.5rem;
+    }
+    .control-list {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0 0;
+    }
+    .control-list li {
+        padding: 0.5rem 0.8rem;
+        margin: 0.4rem 0;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        border-left: 3px solid var(--accent-color, #3b82f6);
+        font-size: 0.9rem;
+    }
+    .control-list li strong {
+        color: var(--accent-color, #3b82f6);
+        margin-right: 0.3rem;
+    }
+</style>
+</head>
+<body>
+<header>
+    <h1>Samantha Prompt Chaining → llama.cpp → Execution</h1>
+    <p class="lead">
+        Follow the data like a metabolic pathway: prompts enter on the left, march down the five-loop ladder, flow through llama.cpp,
+        and feed downstream code execution plus feedback reservoirs. Hover nodes to read what each stage contributes; the lanes give a
+        strict left-to-right dependency so you can trace causality.
+    </p>
+</header>
+
+<section>
+    <svg id="diagram"></svg>
+</section>
+
+<section>
+    <h2 style="margin-top:0">Subsystem Cards</h2>
+    <div id="legend"></div>
+</section>
+
+<section>
+    <h2 style="margin-top:0">Loop Timeline (think of it as sequential reactions)</h2>
+    <div class="timeline">
+        <div class="timeline-step">
+            <strong>Step 1 · Intake & Cueing</strong>
+            Load TXT prompts, split by $$$, extract hyperparameters, and pull GGUF models from Downloads or URLs.
+        </div>
+        <div class="timeline-step">
+            <strong>Step 2 · Loop Ladder</strong>
+            Loop 5 multiplies the model list, Loop 1 iterates models, Loop 2 reloads llama.cpp per model, Loop 3 iterates prompts, Loop 4 streams tokens.
+        </div>
+        <div class="timeline-step">
+            <strong>Step 3 · llama.cpp Core</strong>
+            Llama() sets n_ctx/threading, tokenizer builds KV cache, sampling stack outputs tokens, Learning Mode probes logits.
+        </div>
+        <div class="timeline-step">
+            <strong>Step 4 · Interpreter Handoff</strong>
+            Regex extracts Python/HTML, #IDE clipboard wins priority, subprocesses in the jupyterlab env run the code, stop signals propagate back.
+        </div>
+        <div class="timeline-step">
+            <strong>Step 5 · Feedback Reservoir</strong>
+            Outputs hit Gradio, audio, HTML, and full_text/partial_text files so the next prompt can recycle these metabolites.
+        </div>
+    </div>
+</section>
+
+<section class="interface-section">
+    <h2 style="margin-top:0">User & Admin Interface Controls</h2>
+    <div class="interface-grid">
+        <div class="interface-card" style="--accent-color: #10b981;">
+            <h3><span class="icon">👤</span> User View</h3>
+            <p style="color: var(--muted); margin: 0.5rem 0;">Standard interface for prompt execution and model interaction</p>
+            <ul class="control-list">
+                <li><strong>Prompt Entry:</strong> Text areas for system/user prompts with $$$ chaining</li>
+                <li><strong>Model Selection:</strong> Choose from available GGUF models in Downloads</li>
+                <li><strong>Basic Parameters:</strong> Temperature, top_p, max_tokens sliders</li>
+                <li><strong>Run Controls:</strong> Start/Stop generation, Run Code toggle</li>
+                <li><strong>Output Display:</strong> View model responses, execution results</li>
+                <li><strong>Audio Controls:</strong> Enable/disable TTS and sound effects</li>
+                <li><strong>History:</strong> View recent responses and copy outputs</li>
+            </ul>
+        </div>
+
+        <div class="interface-card" style="--accent-color: #f59e0b;">
+            <h3><span class="icon">🔧</span> Advanced User View</h3>
+            <p style="color: var(--muted); margin: 0.5rem 0;">Extended controls for power users and experimentation</p>
+            <ul class="control-list">
+                <li><strong>Feedback Loop:</strong> Enable cumulative response chaining</li>
+                <li><strong>Learning Mode:</strong> Token probability visualization</li>
+                <li><strong>Sampling Tuning:</strong> min_p, tfs_z, repeat penalties, mirostat</li>
+                <li><strong>Context Management:</strong> n_ctx size, previous answer inclusion</li>
+                <li><strong>Code Execution:</strong> Automatic Python/HTML running, #IDE detection</li>
+                <li><strong>Prompt Library:</strong> Load/save prompt templates</li>
+                <li><strong>Model Comparison:</strong> Run multiple models on same prompt</li>
+                <li><strong>Copy & Paste LLM:</strong> Download models from URLs</li>
+            </ul>
+        </div>
+
+        <div class="interface-card" style="--accent-color: #ef4444;">
+            <h3><span class="icon">⚙️</span> Admin/Developer View</h3>
+            <p style="color: var(--muted); margin: 0.5rem 0;">System configuration and diagnostic tools</p>
+            <ul class="control-list">
+                <li><strong>Environment Config:</strong> Switch between samantha/jupyterlab conda envs</li>
+                <li><strong>Model Management:</strong> Set model paths, manage GGUF library</li>
+                <li><strong>Thread Control:</strong> n_threads, n_threads_batch settings</li>
+                <li><strong>Memory Monitoring:</strong> KV cache usage, context window tracking</li>
+                <li><strong>Debug Output:</strong> View tokenizer details, logits, eval times</li>
+                <li><strong>File I/O:</strong> Configure auto-save paths, backup intervals</li>
+                <li><strong>Voice Config:</strong> SAPI5/Vosk settings, language selection</li>
+                <li><strong>Safety Limits:</strong> Max iterations, timeout thresholds</li>
+            </ul>
+        </div>
+
+        <div class="interface-card" style="--accent-color: #8b5cf6;">
+            <h3><span class="icon">🔄</span> Feedback Reservoir Details</h3>
+            <p style="color: var(--muted); margin: 0.5rem 0;">How Samantha recycles outputs for iterative workflows</p>
+            <ul class="control-list">
+                <li><strong>full_text.txt:</strong> Complete response history across all prompts (str)</li>
+                <li><strong>partial_text.txt:</strong> Current prompt's accumulated output (str)</li>
+                <li><strong>ultima_resposta:</strong> Last model response stored in memory (str)</li>
+                <li><strong>previous_answer:</strong> Fed into next prompt's context (str)</li>
+                <li><strong>Code Outputs:</strong> Captured stdout/stderr from subprocess (str)</li>
+                <li><strong>Stop Signals:</strong> STOP_SAMANTHA or empty stdout triggers (bool)</li>
+                <li><strong>Cumulative Mode:</strong> Appends responses instead of replacing (toggle)</li>
+                <li><strong>Feedback Loop:</strong> Auto-inserts ultima_resposta into next cycle (toggle)</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<div id="tooltip"></div>
+
+<script>
+const stages = [
+    { id: "Prompt Intake", color: "#FFB703", blurb: "Reads prompt files, applies bracket wrappers, extracts per-prompt hyperparameters." },
+    { id: "Loop Ladder", color: "#FB8500", blurb: "Five nested loops orchestrate model × prompt × token sequencing." },
+    { id: "llama.cpp Core", color: "#219EBC", blurb: "Llama() init, tokenizer/KV cache, sampling stack, and Learning Mode analytics." },
+    { id: "Execution Bubble", color: "#8ECAE6", blurb: "Regex extraction, clipboard #IDE override, jupyterlab Python/HTML subprocesses, stop conditions." },
+    { id: "Feedback & UI", color: "#C77DFF", blurb: "HTML rendering, audio, Gradio widgets, and the text reservoirs feeding the next cycle." }
+];
+
+const nodes = [
+    { id: "Prompt Files", stage: "Prompt Intake", detail: "system_prompts.txt, user_prompts.txt, and last_* backups are loaded at startup.", dataType: "str (file paths)", dataTypeDetail: "String paths to .txt files containing prompts. Files use $$$ or $-$-$ delimiters to separate multiple prompts." },
+    { id: "System Prompt Store", stage: "Prompt Intake", detail: "Maintains bilingual defaults plus [ ] / [[ ]] wrappers appended to each prompt.", dataType: "str", dataTypeDetail: "String text that gets prepended to user prompts. Supports [Initial Prompt] and [[Final Prompt]] bracket syntax." },
+    { id: "Prompt Chaining Parser", stage: "Prompt Intake", detail: "Splits prompts using $$$, ignores --- lines, resolves partial_text/full_text placeholders.", dataType: "list[str]", dataTypeDetail: "List of string prompts after splitting. Each element is one prompt in the chain." },
+    { id: "Hyperparameter Extractor", stage: "Prompt Intake", detail: "Reads {temperature=0.7,...} blocks and overrides sliders per prompt.", dataType: "dict", dataTypeDetail: "Dictionary mapping parameter names (str) to values (float/int). Example: {'temperature': 0.7, 'top_p': 0.9}" },
+    { id: "Downloads + Copy&Paste", stage: "Prompt Intake", detail: "Scans ~/Downloads for *.gguf and downloads ad-hoc models into MODEL_FOR_TESTING.gguf.", dataType: "list[str]", dataTypeDetail: "List of absolute file paths (strings) pointing to .gguf model files on disk." },
+    { id: "Loop 5 · Sequence Count", stage: "Loop Ladder", detail: "Replicates the model list when Number of Loops > 1.", dataType: "int", dataTypeDetail: "Integer controlling outer loop iterations. Multiplies the entire model list N times for repeated experiments." },
+    { id: "Loop 1 · Models", stage: "Loop Ladder", detail: "Iterates the GGUF list, respecting shuffle and single-answer rules.", dataType: "list[str]", dataTypeDetail: "Iterable list of model file paths. Loop index selects which model to load next." },
+    { id: "Loop 2 · Reinit", stage: "Loop Ladder", detail: "Deletes the previous Llama() object, loads the next model, resets vocabulary cache.", dataType: "None", dataTypeDetail: "Executes model cleanup and reload. No return value, but updates global llm object reference." },
+    { id: "Loop 3 · Prompts", stage: "Loop Ladder", detail: "Feeds each prompt chunk into the active model while tracking per-model response counts.", dataType: "list[str]", dataTypeDetail: "Iterates over prompt list. Each prompt is a string fed to create_chat_completion()." },
+    { id: "Loop 4 · Tokens", stage: "Loop Ladder", detail: "Streams llm.create_chat_completion(..., stream=True) token by token.", dataType: "generator", dataTypeDetail: "Python generator yielding dict objects. Each dict contains 'choices' with token deltas." },
+    { id: "Llama Loader", stage: "llama.cpp Core", detail: "Instantiates Llama(model_path, n_ctx, n_threads, seed) around line 936.", dataType: "Llama object", dataTypeDetail: "llama_cpp.Llama class instance. Wraps the C++ llama.cpp inference engine." },
+    { id: "Tokenizer & Context", stage: "llama.cpp Core", detail: "Tokenizes system prompt, previous response, and user prompt; grows KV cache.", dataType: "list[int]", dataTypeDetail: "Token IDs as integers. Vocabulary maps strings to int indices in the model's embedding table." },
+    { id: "Sampling Stack", stage: "llama.cpp Core", detail: "Applies temperature, top_p, min_p, tfs_z, repeat penalties before emitting each token.", dataType: "np.ndarray", dataTypeDetail: "NumPy array of float32 logits (unnormalized log probabilities) for vocabulary size ~32k-128k tokens." },
+    { id: "Learning Mode", stage: "llama.cpp Core", detail: "Reads llm.eval_logits[-1] to visualize token probabilities and unlikely selections.", dataType: "np.ndarray", dataTypeDetail: "Same logits array as sampling. Converted to probabilities via softmax for display in Gradio charts." },
+    { id: "Python / HTML Extractor", stage: "Execution Bubble", detail: "Regex captures ```python```/```html``` blocks or #IDE-tagged selections.", dataType: "str", dataTypeDetail: "Raw code string extracted from markdown fences. May contain multi-line Python or HTML." },
+    { id: "Clipboard & #IDE", stage: "Execution Bubble", detail: "#IDE in copied text overrides fenced blocks when Run Code is triggered.", dataType: "str", dataTypeDetail: "Clipboard content via pyperclip.paste(). String searched for #IDE comment marker." },
+    { id: "JupyterLab Runner", stage: "Execution Bubble", detail: "Writes temp files and runs python.exe inside miniconda3/envs/jupyterlab.", dataType: "subprocess", dataTypeDetail: "subprocess.run() returns CompletedProcess object with stdout (str), stderr (str), returncode (int)." },
+    { id: "Stop Conditions", stage: "Execution Bubble", detail: "Detects STOP_SAMANTHA, non-empty stdout, empty-string HTML suppression, Stop buttons.", dataType: "bool", dataTypeDetail: "Boolean flag. True interrupts Loop 4 token generation, False continues streaming." },
+    { id: "HTML Renderer", stage: "Feedback & UI", detail: "Shows HTML output in a browser tab whenever subprocess stdout contains markup.", dataType: "str", dataTypeDetail: "HTML string written to temporary .html file, then opened via webbrowser.open()." },
+    { id: "Audio / TTS", stage: "Feedback & UI", detail: "winsound beeps, pyttsx3, and optional Edge TTS read-outs of ultima_resposta.", dataType: "str", dataTypeDetail: "Text string passed to pyttsx3.say(). Audio bytes for Vosk are np.ndarray (int16 PCM)." },
+    { id: "Gradio Output", stage: "Feedback & UI", detail: "Updates right-column history, Learning Mode charts, buttons, and voice widgets.", dataType: "gr.update()", dataTypeDetail: "Gradio update dict: {'value': new_text, 'visible': True}. Triggers UI re-render in browser." },
+    { id: "Feedback Reservoir", stage: "Feedback & UI", detail: "Writes full_text.txt/partial_text.txt and updates previous_answer for the next cycle.", dataType: "str", dataTypeDetail: "Accumulated response strings. Stored both in-memory (global vars) and on-disk (.txt files)." }
+];
+
+const links = [
+    { source: "Prompt Files", target: "Prompt Chaining Parser", label: "Load & split" },
+    { source: "System Prompt Store", target: "Prompt Chaining Parser", label: "Prepend" },
+    { source: "Prompt Chaining Parser", target: "Hyperparameter Extractor", label: "{...}" },
+    { source: "Hyperparameter Extractor", target: "Loop 5 · Sequence Count", label: "Override" },
+    { source: "Downloads + Copy&Paste", target: "Loop 1 · Models", label: "GGUF list" },
+    { source: "Loop 5 · Sequence Count", target: "Loop 1 · Models", label: "Expanded list" },
+    { source: "Loop 1 · Models", target: "Loop 2 · Reinit", label: "Per model" },
+    { source: "Loop 2 · Reinit", target: "Llama Loader", label: "Instantiate" },
+    { source: "Llama Loader", target: "Tokenizer & Context", label: "n_ctx" },
+    { source: "Tokenizer & Context", target: "Loop 3 · Prompts", label: "Tokenized prompt" },
+    { source: "Loop 3 · Prompts", target: "Loop 4 · Tokens", label: "messages[]" },
+    { source: "Loop 4 · Tokens", target: "Sampling Stack", label: "logits" },
+    { source: "Sampling Stack", target: "Learning Mode", label: "scores" },
+    { source: "Sampling Stack", target: "Gradio Output", label: "tokens" },
+    { source: "Learning Mode", target: "Gradio Output", label: "charts" },
+    { source: "Loop 4 · Tokens", target: "Python / HTML Extractor", label: "stream" },
+    { source: "Python / HTML Extractor", target: "Clipboard & #IDE", label: "#IDE priority" },
+    { source: "Clipboard & #IDE", target: "JupyterLab Runner", label: "temp files" },
+    { source: "JupyterLab Runner", target: "Stop Conditions", label: "stdout" },
+    { source: "Stop Conditions", target: "Loop 4 · Tokens", label: "interrupt" },
+    { source: "Stop Conditions", target: "Gradio Output", label: "status" },
+    { source: "Loop 4 · Tokens", target: "Feedback Reservoir", label: "ultima_resposta" },
+    { source: "Feedback Reservoir", target: "Prompt Chaining Parser", label: "full_text" },
+    { source: "Feedback Reservoir", target: "System Prompt Store", label: "previous_answer" },
+    { source: "Loop 4 · Tokens", target: "Audio / TTS", label: "sound" },
+    { source: "JupyterLab Runner", target: "HTML Renderer", label: "HTML" },
+    { source: "HTML Renderer", target: "Gradio Output", label: "iframe" }
+];
+
+const width = 1100;
+const height = 640;
+const svg = d3.select("#diagram")
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("preserveAspectRatio", "xMidYMid meet");
+
+const stageIndex = new Map(stages.map((stage, i) => [stage.id, i]));
+const stageSpacing = width / (stages.length + 1);
+const laneTop = 120;
+const nodeSpacing = 90;
+const laneCounts = new Map();
+
+nodes.forEach(node => {
+    const idx = stageIndex.get(node.stage);
+    const count = laneCounts.get(node.stage) || 0;
+    node.x = stageSpacing + idx * stageSpacing;
+    node.y = laneTop + count * nodeSpacing;
+    laneCounts.set(node.stage, count + 1);
+});
+
+svg.selectAll(".lane-label")
+    .data(stages)
+    .enter()
+    .append("text")
+    .attr("class", "lane-label")
+    .attr("x", (_, i) => stageSpacing + i * stageSpacing)
+    .attr("y", 60)
+    .text(d => d.id);
+
+const defs = svg.append("defs");
+defs.append("marker")
+    .attr("id", "arrow")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 12)
+    .attr("refY", 0)
+    .attr("markerWidth", 6)
+    .attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("d", "M0,-5L10,0L0,5")
+    .attr("fill", "#94a3b8");
+
+const colorScale = d3.scaleOrdinal()
+    .domain(stages.map(s => s.id))
+    .range(stages.map(s => s.color));
+
+const linkData = links.map(link => ({
+    source: nodes.find(n => n.id === link.source),
+    target: nodes.find(n => n.id === link.target),
+    label: link.label
+}));
+
+const link = svg.append("g")
+    .selectAll("path")
+    .data(linkData)
+    .enter()
+    .append("path")
+    .attr("class", "link")
+    .attr("stroke", d => d3.color(colorScale(d.source.stage)).brighter(0.5))
+    .attr("marker-end", "url(#arrow)")
+    .attr("d", d => curve(d.source, d.target));
+
+function curve(source, target) {
+    const midX = (source.x + target.x) / 2;
+    return `M ${source.x} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${target.x} ${target.y}`;
+}
+
+const node = svg.append("g")
+    .selectAll("g")
+    .data(nodes)
+    .enter()
+    .append("g")
+    .attr("class", "node")
+    .attr("transform", d => `translate(${d.x}, ${d.y})`);
+
+node.append("circle").attr("fill", d => colorScale(d.stage));
+node.append("text").text(d => d.id);
+node.append("text")
+    .attr("class", "data-type-badge")
+    .attr("y", 50)
+    .text(d => d.dataType);
+
+const tooltip = d3.select("#tooltip");
+
+node
+    .on("mouseover", function (event, d) {
+        tooltip
+            .style("opacity", 1)
+            .html(`
+                <strong>${d.id}</strong><br>
+                ${d.detail}<br>
+                <div class="tooltip-datatype">${d.dataType}</div>
+                <div style="margin-top:0.5rem; font-size:0.8rem; color:#94a3b8;">${d.dataTypeDetail}</div>
+            `)
+            .style("left", `${event.pageX + 12}px`)
+            .style("top", `${event.pageY + 12}px`);
+        highlight(d);
+    })
+    .on("mousemove", function (event) {
+        tooltip
+            .style("left", `${event.pageX + 12}px`)
+            .style("top", `${event.pageY + 12}px`);
+    })
+    .on("mouseout", () => {
+        tooltip.style("opacity", 0);
+        resetHighlight();
+    });
+
+const neighborMap = new Map();
+nodes.forEach(n => neighborMap.set(n.id, new Set()));
+linkData.forEach(l => {
+    neighborMap.get(l.source.id).add(l.target.id);
+    neighborMap.get(l.target.id).add(l.source.id);
+});
+
+function highlight(nodeData) {
+    const neighbors = neighborMap.get(nodeData.id);
+    node.classed("dimmed", d => d.id !== nodeData.id && !neighbors.has(d.id));
+    link.classed("dimmed", d => d.source.id !== nodeData.id && d.target.id !== nodeData.id);
+}
+
+function resetHighlight() {
+    node.classed("dimmed", false);
+    link.classed("dimmed", false);
+}
+
+d3.select("#legend")
+    .selectAll("div")
+    .data(stages)
+    .enter()
+    .append("div")
+    .attr("class", "legend-card")
+    .style("--card-color", d => d.color)
+    .style("border-color", d => `${d.color}33`)
+    .style("box-shadow", d => `0 15px 35px ${d.color}22`)
+    .html(d => `<h3>${d.id}</h3><p>${d.blurb}</p>`)
+    .style("position", "relative")
+    .style("background", d => `${d.color}0d`)
+    .on("mouseover", (_, group) => {
+        node.classed("dimmed", d => d.stage !== group.id);
+        link.classed("dimmed", d => d.source.stage !== group.id && d.target.stage !== group.id);
+    })
+    .on("mouseout", () => resetHighlight());
+
+</script>
+</body>
+</html>
